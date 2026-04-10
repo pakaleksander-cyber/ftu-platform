@@ -636,7 +636,54 @@ function PgClientSettings({user,tick}){
 }
 function PgAdminDash({_}){const ps=S.g("ports")||[];const j=S.g("log")||[];return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Администрирование</h1><div className="grid grid-cols-4 gap-3 mb-8"><Card l="Портфелей" v={ps.length} a/><Card l="Завершено" v={ps.filter(p=>p.st==="Завершено").length}/><Card l="Стоимость" v={fC(ps.reduce((a,p)=>a+(p.cost||0),0))}/><Card l="Событий" v={j.length}/></div><div className="bg-white rounded-2xl border border-slate-100 p-3 space-y-1.5">{j.slice(0,8).map(e=><div key={e.id} className="flex gap-2 text-[11px]"><span className="text-slate-400 w-28 shrink-0">{fDT(e.d)}</span><span className="font-bold text-slate-600">{e.ev}</span><span className="text-slate-400 truncate">{e.det}</span></div>)}{!j.length&&<div className="text-[11px] text-slate-300 text-center py-3">Пусто</div>}</div></div>}
 function PgSvcs({tick}){const [svcs,set]=useState(S.g("svcs")||[]);const save=(id,f,v)=>{const u=svcs.map(s=>s.id===id?{...s,[f]:f==="price"?Number(v):v}:s);S.s("svcs",u);set(u);tick()};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Тарифы</h1><div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Услуга","Ед.","Тариф ₽","Вкл"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{svcs.map(s=><tr key={s.id} className="border-b border-slate-50"><td className="px-4 py-2.5 text-[12px] text-slate-700">{s.name}</td><td className="px-4 py-2.5 text-[12px] text-slate-400">{s.unit}</td><td className="px-4 py-2.5"><input type="number" value={s.price} onChange={e=>save(s.id,"price",e.target.value)} className="w-24 text-right text-[12px] px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg"/></td><td className="px-4 py-2.5"><button onClick={()=>save(s.id,"on",!s.on)} className={`w-8 h-4 rounded-full transition flex items-center ${s.on?"bg-emerald-500":"bg-slate-200"}`}><div className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${s.on?"ml-[14px]":"ml-0.5"}`}/></button></td></tr>)}</tbody></table></div></div>}
-function PgUsers(){const us=S.g("users")||[];const rl={client:"Заказчик",executor:"Исполнитель",admin:"Администратор"};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Пользователи</h1><div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Имя","Логин","Пароль","Роль"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{us.map(u=><tr key={u.id} className="border-b border-slate-50"><td className="px-4 py-2.5 text-[12px] font-semibold text-slate-700">{u.name}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.login}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.password}</td><td className="px-4 py-2.5 text-[12px] text-slate-400">{rl[u.role]}</td></tr>)}</tbody></table></div></div>}
+function PgUsers({tick}){
+  const us=S.g("users")||[];
+  const rl={client:"Заказчик",executor:"Исполнитель",admin:"Администратор"};
+  const [showForm,setShowForm]=useState(false);
+  const [name,setName]=useState("");
+  const [login,setLogin]=useState("");
+  const [password,setPassword]=useState("");
+  const [role,setRole]=useState("client");
+  const [err,setErr]=useState("");
+
+  const add=async()=>{
+    if(!name||!login||!password){setErr("Заполните все поля");return}
+    if(password.length<6){setErr("Пароль минимум 6 символов");return}
+    if(us.find(u=>u.login===login)){setErr("Такой логин уже существует");return}
+    const newUser={id:gid(),login,password,role,name,mc:role==="client"};
+    await S.s("users",[...us,newUser]);
+    addLog({name:"Администратор"},"Создан пользователь",`${name} (${login}, ${rl[role]})`);
+    setName("");setLogin("");setPassword("");setRole("client");setErr("");setShowForm(false);tick();
+  };
+
+  const del=async(id)=>{
+    if(!confirm("Удалить пользователя?"))return;
+    const u=us.find(x=>x.id===id);
+    await S.s("users",us.filter(x=>x.id!==id));
+    addLog({name:"Администратор"},"Удалён пользователь",u?.name||"");
+    tick();
+  };
+
+  return <div>
+    <div className="flex items-center justify-between mb-6">
+      <h1 className="text-2xl font-bold text-slate-800">Пользователи</h1>
+      <Btn onClick={()=>setShowForm(!showForm)}>{showForm?"Отмена":"+ Добавить"}</Btn>
+    </div>
+    {showForm&&<div className="bg-white rounded-2xl border border-slate-100 p-5 mb-4">
+      <h2 className="text-[14px] font-bold text-slate-700 mb-4">Новый пользователь</h2>
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Имя / Компания</label><input value={name} onChange={e=>{setName(e.target.value);setErr("")}} placeholder="ООО «Название»" className="mt-1 w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-300"/></div>
+        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Роль</label><select value={role} onChange={e=>setRole(e.target.value)} className="mt-1 w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-300"><option value="client">Заказчик</option><option value="executor">Исполнитель</option><option value="admin">Администратор</option></select></div>
+        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Логин</label><input value={login} onChange={e=>{setLogin(e.target.value);setErr("")}} placeholder="client2" className="mt-1 w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-300 font-mono"/></div>
+        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Пароль</label><input value={password} onChange={e=>{setPassword(e.target.value);setErr("")}} placeholder="минимум 6 символов" className="mt-1 w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-slate-300 font-mono"/></div>
+      </div>
+      {err&&<div className="text-[11px] text-red-500 mb-3">{err}</div>}
+      <div className="text-[11px] text-slate-400 mb-3">{role==="client"?"При первом входе клиент будет вынужден сменить пароль.":""}</div>
+      <Btn onClick={add}>Создать пользователя</Btn>
+    </div>}
+    <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Имя","Логин","Пароль","Роль",""].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{us.map(u=><tr key={u.id} className="border-b border-slate-50"><td className="px-4 py-2.5 text-[12px] font-semibold text-slate-700">{u.name}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.login}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.password}</td><td className="px-4 py-2.5 text-[12px] text-slate-400">{rl[u.role]}</td><td className="px-4 py-2.5 text-right">{!["a1","e1","c1"].includes(u.id)&&<button onClick={()=>del(u.id)} className="text-[11px] text-red-400 hover:text-red-600 font-semibold">Удалить</button>}</td></tr>)}</tbody></table></div>
+  </div>;
+}
 function PgJournal(){const j=S.g("log")||[];return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Журнал</h1>{!j.length?<Empty title="Пусто"/>:<div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Дата","Кто","Событие","Детали"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{j.slice(0,30).map(e=><tr key={e.id} className="border-b border-slate-50"><td className="px-4 py-2 text-[10px] text-slate-400 whitespace-nowrap">{fDT(e.d)}</td><td className="px-4 py-2 text-[11px] text-slate-500">{e.u}</td><td className="px-4 py-2 text-[11px] font-bold text-slate-700">{e.ev}</td><td className="px-4 py-2 text-[11px] text-slate-400">{e.det}</td></tr>)}</tbody></table></div>}</div>}
 function PgData({user,tick}){const [cf,setCf]=useState("");const resetAll=async()=>{await S.s("ports",[]);await S.s("log",[]);await S.s("notifs",[]);await S.s("users",DEF_USERS);await S.s("svcs",DEF_SVCS);setCf("");tick()};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Данные</h1><div className="space-y-3"><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Удалить портфели</div><Btn v="danger" s="s" onClick={()=>{S.s("ports",[]);addLog(user,"Удаление","Все портфели");tick()}}>Удалить</Btn></div><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Очистить журнал</div><Btn v="danger" s="s" onClick={()=>{S.s("log",[]);tick()}}>Очистить</Btn></div><div className="bg-red-50 rounded-2xl border border-red-200 p-4"><div className="text-[12px] font-bold text-red-700 mb-2">Полный сброс</div><div className="flex gap-2"><input value={cf} onChange={e=>setCf(e.target.value)} placeholder="УДАЛИТЬ" className="px-2.5 py-1.5 text-[12px] border border-red-200 rounded-xl w-28"/><Btn v="danger" s="s" disabled={cf!=="УДАЛИТЬ"} onClick={resetAll}>Сбросить</Btn></div></div></div></div>}
 function PgSettings(){return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Настройки</h1><div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-4">{[["Платформа","Платформа Финтех Юнит"],["Исполнитель","ООО Финтех Юнит"],["ИНН","9709112416"]].map(([l,v])=><div key={l}><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{l}</label><input defaultValue={v} className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[12px]"/></div>)}</div></div>}
@@ -674,7 +721,7 @@ export default function App(){
   const page=()=>{
     if(user.role==="client")switch(pg){case"dashboard":return <PgDash user={user} _={_}/>;case"upload":return <PgUpload user={user} tick={tick}/>;case"ports":return <PgList user={user} role="client" tick={tick}/>;case"docs":return <PgDocs user={user}/>;case"csettings":return <PgClientSettings user={user} tick={tick}/>;case"notifs":return <PgNotifs user={user} tick={tick}/>;default:return <PgDash user={user} _={_}/>}
     if(user.role==="executor")switch(pg){case"dashboard":return <PgDash user={user} _={_}/>;case"incoming":return <PgList user={user} role="executor" tick={tick}/>;case"docs":return <PgDocs user={user}/>;case"notifs":return <PgNotifs user={user} tick={tick}/>;default:return <PgDash user={user} _={_}/>}
-    switch(pg){case"dashboard":return <PgAdminDash _={_}/>;case"svcs":return <PgSvcs tick={tick}/>;case"users":return <PgUsers/>;case"docs":return <PgDocs user={user}/>;case"journal":return <PgJournal/>;case"data":return <PgData user={user} tick={tick}/>;case"settings":return <PgSettings/>;default:return <PgAdminDash _={_}/>}
+    switch(pg){case"dashboard":return <PgAdminDash _={_}/>;case"svcs":return <PgSvcs tick={tick}/>;case"users":return <PgUsers tick={tick}/>;case"docs":return <PgDocs user={user}/>;case"journal":return <PgJournal/>;case"data":return <PgData user={user} tick={tick}/>;case"settings":return <PgSettings/>;default:return <PgAdminDash _={_}/>}
   };
   return <div className="flex min-h-screen bg-slate-50"><Nav user={user} pg={pg} go={setPg} out={()=>{S.lrm("session");setUser(null);setPg("dashboard")}} unread={unread}/><main className="flex-1 p-7 overflow-auto">{page()}</main></div>;
 }
