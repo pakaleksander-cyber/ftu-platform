@@ -1,20 +1,54 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 
-/* ── localStorage store + in-memory for large data ── */
-const PFX = "ftu_";
-const S = {
-  g: (k) => { try { const v = localStorage.getItem(PFX + k); return v ? JSON.parse(v) : null; } catch { return null; } },
-  s: (k, v) => { try { localStorage.setItem(PFX + k, JSON.stringify(v)); } catch {} },
-  rm: (k) => { try { localStorage.removeItem(PFX + k); } catch {} },
-  keys: () => { try { return Object.keys(localStorage).filter(k => k.startsWith(PFX)).map(k => k.slice(PFX.length)); } catch { return []; } },
+/* ── Firebase ── */
+const firebaseConfig = {
+  apiKey: "AIzaSyAJoN3uZUQxF59Azn9XGOcXqQ_eGyhJXtA",
+  authDomain: "creditstatus-50bc6.firebaseapp.com",
+  projectId: "creditstatus-50bc6",
+  storageBucket: "creditstatus-50bc6.firebasestorage.app",
+  messagingSenderId: "139839970150",
+  appId: "1:139839970150:web:3303e89ef5ccaed9af46a7"
 };
-// In-memory store for large data (rawData too big for localStorage)
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+/* ── Storage: Firestore for shared data, localStorage for session, memory for raw data ── */
+// Local cache for data (updated by subscriptions)
+const _cache = {};
+// In-memory store for large raw data (can't go to Firestore due to size)
 const _rawCache = {};
+
+const S = {
+  g: (k) => _cache[k] != null ? JSON.parse(JSON.stringify(_cache[k])) : null,
+  s: async (k, v) => {
+    _cache[k] = v;
+    try { await setDoc(doc(db, "platform", k), { data: v }); } catch(e) { console.error("Firestore write error:", e); }
+  },
+  // Local-only (for session)
+  lg: (k) => { try { const v = localStorage.getItem("ftu_" + k); return v ? JSON.parse(v) : null; } catch { return null; } },
+  ls: (k, v) => { try { localStorage.setItem("ftu_" + k, JSON.stringify(v)); } catch {} },
+  lrm: (k) => { try { localStorage.removeItem("ftu_" + k); } catch {} },
+};
+
 const RD = {
   set: (id, data) => { _rawCache[id] = data; },
   get: (id) => _rawCache[id] || null,
+};
+
+// Subscribe to all shared data on app start
+const subscribeAll = (onUpdate) => {
+  const keys = ["users", "svcs", "ports", "log", "notifs", "clientInfos"];
+  const unsubs = keys.map(k => onSnapshot(doc(db, "platform", k), (snap) => {
+    if (snap.exists()) {
+      _cache[k] = snap.data().data;
+      onUpdate();
+    }
+  }, (err) => console.error("Firestore sub error", k, err)));
+  return () => unsubs.forEach(u => u());
 };
 const gid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const fmt=n=>n!=null?n.toLocaleString("ru-RU"):"—";
@@ -36,7 +70,29 @@ const DEF_SVCS=[
   {id:"s5",name:"Юридическая проверка",unit:"Запись",price:320,on:true},
   {id:"s6",name:"Повторная актуализация",unit:"Запись",price:145,on:true},
 ];
-const init=()=>{if(!S.g("users"))S.s("users",DEF_USERS);if(!S.g("svcs"))S.s("svcs",DEF_SVCS);if(!S.g("ports"))S.s("ports",[]);if(!S.g("log"))S.s("log",[]);if(!S.g("notifs"))S.s("notifs",[])};
+const init = async () => {
+  try {
+    // Check each key and initialize if missing
+    const initKeys = [
+      ["users", DEF_USERS],
+      ["svcs", DEF_SVCS],
+      ["ports", []],
+      ["log", []],
+      ["notifs", []],
+    ];
+    for (const [k, defaultVal] of initKeys) {
+      const snap = await getDoc(doc(db, "platform", k));
+      if (!snap.exists()) {
+        await setDoc(doc(db, "platform", k), { data: defaultVal });
+        _cache[k] = defaultVal;
+      } else {
+        _cache[k] = snap.data().data;
+      }
+    }
+  } catch (e) {
+    console.error("Init error:", e);
+  }
+};
 
 /* ── Scoring logic ── */
 const EXTRA_H=["Скоринговый балл","Уровень риска","Вероятность погашения %","Класс","Дата скоринга","Стратегия","Приоритет","Канал контакта","Время контакта","Перспективность суда","Госпошлина руб","СИД","Подсудность","Целесообразность суда","Контактность","Верифиц контактов","Статус телефона","Статус адреса","Сегмент","Прогноз recovery руб","Примечание"];
@@ -433,7 +489,7 @@ const Nav=({user,pg,go,out,unread})=>{
   return <aside className="w-56 bg-white border-r border-slate-100 flex flex-col shrink-0 min-h-screen">
     <div className="p-4 border-b border-slate-100 flex items-center gap-2.5"><div className="w-8 h-8 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black text-[10px]">FT</div><div><div className="text-[12px] font-bold text-slate-700">Финтех Юнит</div><div className="text-[9px] text-slate-400">Платформа</div></div></div>
     <nav className="flex-1 p-2 space-y-0.5">{(M[user.role]||[]).map(m=><button key={m.k} onClick={()=>go(m.k)} className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[12px] transition-all ${pg===m.k?"bg-slate-900 text-white font-bold":"text-slate-500 hover:bg-slate-50"}`}>{m.i}<span className="flex-1 text-left">{m.l}</span>{m.b>0&&<span className="rounded-full bg-red-500 text-white text-[9px] font-bold px-1.5">{m.b}</span>}</button>)}</nav>
-    <div className="p-2 border-t border-slate-100"><div className="px-3 py-2">{(()=>{const ci=user.role==="client"?S.g("clientInfo_"+user.id):null;const displayName=ci?.company||user.name;const displaySub=ci?.email||rl[user.role];return <><div className="text-[12px] font-bold text-slate-700 truncate">{displayName}</div><div className="text-[9px] text-slate-400 truncate">{displaySub}</div>{ci?.phone&&<div className="text-[9px] text-slate-400 truncate">{ci.phone}</div>}</>})()}</div><button onClick={out} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] text-slate-400 hover:text-red-500 hover:bg-red-50 transition">{I.out}<span>Выйти</span></button></div>
+    <div className="p-2 border-t border-slate-100"><div className="px-3 py-2">{(()=>{const ci=user.role==="client"?(S.g("clientInfos")||{})[user.id]:null;const displayName=ci?.company||user.name;const displaySub=ci?.email||rl[user.role];return <><div className="text-[12px] font-bold text-slate-700 truncate">{displayName}</div><div className="text-[9px] text-slate-400 truncate">{displaySub}</div>{ci?.phone&&<div className="text-[9px] text-slate-400 truncate">{ci.phone}</div>}</>})()}</div><button onClick={out} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] text-slate-400 hover:text-red-500 hover:bg-red-50 transition">{I.out}<span>Выйти</span></button></div>
   </aside>;
 };
 
@@ -559,11 +615,14 @@ function PgDocs({user}){
 
 function PgNotifs({user,tick}){const all=S.g("notifs")||[];const my=all.filter(n=>n.role===user.role);const mark=id=>{const u=all.map(n=>n.id===id?{...n,read:true}:n);S.s("notifs",u);tick()};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Уведомления</h1>{!my.length?<Empty title="Нет"/>:<div className="space-y-1.5">{my.map(n=><div key={n.id} onClick={()=>mark(n.id)} className={`p-3.5 rounded-2xl border cursor-pointer transition ${n.read?"bg-white border-slate-100":"bg-blue-50 border-blue-200"}`}><div className="flex justify-between"><div className="text-[12px] font-bold text-slate-700">{n.title}</div><div className="text-[10px] text-slate-400">{fDT(n.d)}</div></div><div className="text-[11px] text-slate-500 mt-0.5">{n.det}</div></div>)}</div>}</div>}
 function PgClientSettings({user,tick}){
-  const stored=S.g("clientInfo_"+user.id)||{};
+  const allInfos=S.g("clientInfos")||{};
+  const stored=allInfos[user.id]||{};
   const [company,setCompany]=useState(stored.company||"");const [email,setEmail]=useState(stored.email||"");const [phone,setPhone]=useState(stored.phone||"");const [saved,setSaved]=useState(false);
-  const save=()=>{
-    S.s("clientInfo_"+user.id,{company,email,phone});
-    if(company){const us=S.g("users");const i=us.findIndex(x=>x.id===user.id);if(i>=0){us[i].name=company;S.s("users",us)}}
+  const save=async()=>{
+    const infos=S.g("clientInfos")||{};
+    infos[user.id]={company,email,phone};
+    await S.s("clientInfos",infos);
+    if(company){const us=S.g("users");const i=us.findIndex(x=>x.id===user.id);if(i>=0){us[i].name=company;await S.s("users",us)}}
     setSaved(true);addLog(user,"Настройки","Данные обновлены: "+company);tick();setTimeout(()=>setSaved(false),2000);
   };
   return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Настройки</h1>
@@ -579,7 +638,7 @@ function PgAdminDash({_}){const ps=S.g("ports")||[];const j=S.g("log")||[];retur
 function PgSvcs({tick}){const [svcs,set]=useState(S.g("svcs")||[]);const save=(id,f,v)=>{const u=svcs.map(s=>s.id===id?{...s,[f]:f==="price"?Number(v):v}:s);S.s("svcs",u);set(u);tick()};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Тарифы</h1><div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Услуга","Ед.","Тариф ₽","Вкл"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{svcs.map(s=><tr key={s.id} className="border-b border-slate-50"><td className="px-4 py-2.5 text-[12px] text-slate-700">{s.name}</td><td className="px-4 py-2.5 text-[12px] text-slate-400">{s.unit}</td><td className="px-4 py-2.5"><input type="number" value={s.price} onChange={e=>save(s.id,"price",e.target.value)} className="w-24 text-right text-[12px] px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg"/></td><td className="px-4 py-2.5"><button onClick={()=>save(s.id,"on",!s.on)} className={`w-8 h-4 rounded-full transition flex items-center ${s.on?"bg-emerald-500":"bg-slate-200"}`}><div className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${s.on?"ml-[14px]":"ml-0.5"}`}/></button></td></tr>)}</tbody></table></div></div>}
 function PgUsers(){const us=S.g("users")||[];const rl={client:"Заказчик",executor:"Исполнитель",admin:"Администратор"};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Пользователи</h1><div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Имя","Логин","Пароль","Роль"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{us.map(u=><tr key={u.id} className="border-b border-slate-50"><td className="px-4 py-2.5 text-[12px] font-semibold text-slate-700">{u.name}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.login}</td><td className="px-4 py-2.5 text-[12px] text-slate-500 font-mono">{u.password}</td><td className="px-4 py-2.5 text-[12px] text-slate-400">{rl[u.role]}</td></tr>)}</tbody></table></div></div>}
 function PgJournal(){const j=S.g("log")||[];return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Журнал</h1>{!j.length?<Empty title="Пусто"/>:<div className="bg-white rounded-2xl border border-slate-100 overflow-hidden"><table className="w-full"><thead><tr className="border-b border-slate-100">{["Дата","Кто","Событие","Детали"].map(h=><th key={h} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider px-4 py-2.5">{h}</th>)}</tr></thead><tbody>{j.slice(0,30).map(e=><tr key={e.id} className="border-b border-slate-50"><td className="px-4 py-2 text-[10px] text-slate-400 whitespace-nowrap">{fDT(e.d)}</td><td className="px-4 py-2 text-[11px] text-slate-500">{e.u}</td><td className="px-4 py-2 text-[11px] font-bold text-slate-700">{e.ev}</td><td className="px-4 py-2 text-[11px] text-slate-400">{e.det}</td></tr>)}</tbody></table></div>}</div>}
-function PgData({user,tick}){const [cf,setCf]=useState("");return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Данные</h1><div className="space-y-3"><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Удалить портфели</div><Btn v="danger" s="s" onClick={()=>{S.s("ports",[]);addLog(user,"Удаление","Все портфели");tick()}}>Удалить</Btn></div><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Очистить журнал</div><Btn v="danger" s="s" onClick={()=>{S.s("log",[]);tick()}}>Очистить</Btn></div><div className="bg-red-50 rounded-2xl border border-red-200 p-4"><div className="text-[12px] font-bold text-red-700 mb-2">Полный сброс</div><div className="flex gap-2"><input value={cf} onChange={e=>setCf(e.target.value)} placeholder="УДАЛИТЬ" className="px-2.5 py-1.5 text-[12px] border border-red-200 rounded-xl w-28"/><Btn v="danger" s="s" disabled={cf!=="УДАЛИТЬ"} onClick={()=>{S.keys().forEach(k=>S.rm(k));init();setCf("");tick()}}>Сбросить</Btn></div></div></div></div>}
+function PgData({user,tick}){const [cf,setCf]=useState("");const resetAll=async()=>{await S.s("ports",[]);await S.s("log",[]);await S.s("notifs",[]);await S.s("users",DEF_USERS);await S.s("svcs",DEF_SVCS);setCf("");tick()};return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Данные</h1><div className="space-y-3"><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Удалить портфели</div><Btn v="danger" s="s" onClick={()=>{S.s("ports",[]);addLog(user,"Удаление","Все портфели");tick()}}>Удалить</Btn></div><div className="bg-white rounded-2xl border border-slate-100 p-4"><div className="text-[12px] font-bold text-slate-700 mb-2">Очистить журнал</div><Btn v="danger" s="s" onClick={()=>{S.s("log",[]);tick()}}>Очистить</Btn></div><div className="bg-red-50 rounded-2xl border border-red-200 p-4"><div className="text-[12px] font-bold text-red-700 mb-2">Полный сброс</div><div className="flex gap-2"><input value={cf} onChange={e=>setCf(e.target.value)} placeholder="УДАЛИТЬ" className="px-2.5 py-1.5 text-[12px] border border-red-200 rounded-xl w-28"/><Btn v="danger" s="s" disabled={cf!=="УДАЛИТЬ"} onClick={resetAll}>Сбросить</Btn></div></div></div></div>}
 function PgSettings(){return <div><h1 className="text-2xl font-bold text-slate-800 mb-6">Настройки</h1><div className="bg-white rounded-2xl border border-slate-100 p-5 space-y-4">{[["Платформа","Платформа Финтех Юнит"],["Исполнитель","ООО Финтех Юнит"],["ИНН","9709112416"]].map(([l,v])=><div key={l}><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{l}</label><input defaultValue={v} className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[12px]"/></div>)}</div></div>}
 
 /* Login */
@@ -588,11 +647,26 @@ function ChPw({user,onDone}){const [a,setA]=useState("");const [b,setB]=useState
 
 /* App */
 export default function App(){
-  const [user,setUser]=useState(()=>S.g("session"));
-  const [pg,setPg]=useState("dashboard");const [v,setV]=useState(0);
+  const [user,setUser]=useState(()=>S.lg("session"));
+  const [pg,setPg]=useState("dashboard");
+  const [v,setV]=useState(0);
+  const [ready,setReady]=useState(false);
   const tick=useCallback(()=>setV(n=>n+1),[]);
-  useEffect(()=>{init()},[]);
-  useEffect(()=>{if(user&&!user._cp)S.s("session",user);else S.rm("session")},[user]);
+
+  useEffect(()=>{
+    let unsub=null;
+    (async()=>{
+      await init();
+      unsub=subscribeAll(tick);
+      setReady(true);
+    })();
+    return ()=>{if(unsub)unsub()};
+  },[tick]);
+
+  useEffect(()=>{if(user&&!user._cp)S.ls("session",user);else S.lrm("session")},[user]);
+
+  if(!ready)return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-center"><div className="w-12 h-12 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin mb-4 mx-auto"></div><div className="text-[13px] text-slate-400">Подключение...</div></div></div>;
+
   const notifs=S.g("notifs")||[];const unread=user?notifs.filter(n=>n.role===user.role&&!n.read).length:0;
   if(!user)return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4"><Login onLogin={u=>{if(u.mc)setUser({...u,_cp:true});else setUser(u)}}/></div>;
   if(user._cp)return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4"><ChPw user={user} onDone={u=>setUser(u)}/></div>;
@@ -602,5 +676,6 @@ export default function App(){
     if(user.role==="executor")switch(pg){case"dashboard":return <PgDash user={user} _={_}/>;case"incoming":return <PgList user={user} role="executor" tick={tick}/>;case"docs":return <PgDocs user={user}/>;case"notifs":return <PgNotifs user={user} tick={tick}/>;default:return <PgDash user={user} _={_}/>}
     switch(pg){case"dashboard":return <PgAdminDash _={_}/>;case"svcs":return <PgSvcs tick={tick}/>;case"users":return <PgUsers/>;case"docs":return <PgDocs user={user}/>;case"journal":return <PgJournal/>;case"data":return <PgData user={user} tick={tick}/>;case"settings":return <PgSettings/>;default:return <PgAdminDash _={_}/>}
   };
-  return <div className="flex min-h-screen bg-slate-50"><Nav user={user} pg={pg} go={setPg} out={()=>{S.rm("session");setUser(null);setPg("dashboard")}} unread={unread}/><main className="flex-1 p-7 overflow-auto">{page()}</main></div>;
+  return <div className="flex min-h-screen bg-slate-50"><Nav user={user} pg={pg} go={setPg} out={()=>{S.lrm("session");setUser(null);setPg("dashboard")}} unread={unread}/><main className="flex-1 p-7 overflow-auto">{page()}</main></div>;
 }
+
