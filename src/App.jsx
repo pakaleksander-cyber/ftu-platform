@@ -183,34 +183,112 @@ function genCourtXLSX(rd){
 function genActHTML(port){
   const svcs=S.g("svcs")||[];const sel=(port.svcs||[]).map(sid=>svcs.find(s=>s.id===sid)).filter(Boolean);
   let rows="",total=0;
-  sel.forEach((sv,i)=>{const qty=sv.unit==="Комплект"?1:(port.cnt||0);const sum=sv.unit==="Комплект"?sv.price:sv.price*qty;total+=sum;
-    rows+=`<tr><td>${i+1}</td><td>${sv.name}</td><td>${sv.unit}</td><td class="r">${fmt(qty)}</td><td class="r">${fmt(sv.price)}</td><td class="r">${fmt(sum)}</td></tr>`;
+  sel.forEach((sv,i)=>{
+    const qty=sv.unit==="Комплект"?1:(port.cnt||0);
+    const sum=sv.unit==="Комплект"?sv.price:sv.price*qty;
+    total+=sum;
+    rows+=`<tr><td class="c">${i+1}</td><td>${sv.name}</td><td class="c">${sv.unit==="Запись"?"запись":sv.unit.toLowerCase()}</td><td class="r">${fmt(qty)}</td><td class="r">${fmt(sv.price)}</td><td class="r">${fmt(sum)}</td></tr>`;
   });
+  // Number to words (simplified for totals)
+  const numToWords=(n)=>{
+    const ones=["","одна","две","три","четыре","пять","шесть","семь","восемь","девять"];
+    const teens=["десять","одиннадцать","двенадцать","тринадцать","четырнадцать","пятнадцать","шестнадцать","семнадцать","восемнадцать","девятнадцать"];
+    const tens=["","","двадцать","тридцать","сорок","пятьдесят","шестьдесят","семьдесят","восемьдесят","девяносто"];
+    const hundreds=["","сто","двести","триста","четыреста","пятьсот","шестьсот","семьсот","восемьсот","девятьсот"];
+    const thousands=["","одна тысяча","две тысячи","три тысячи","четыре тысячи","пять тысяч","шесть тысяч","семь тысяч","восемь тысяч","девять тысяч"];
+    if(n===0)return "ноль";
+    let result="";
+    const intN=Math.floor(n);
+    const mln=Math.floor(intN/1000000);
+    const th=Math.floor((intN%1000000)/1000);
+    const rest=intN%1000;
+    if(mln>0)result+=mln+" миллионов ";
+    if(th>=100){result+=hundreds[Math.floor(th/100)]+" ";}
+    const thRest=th%100;
+    if(thRest>=20){result+=tens[Math.floor(thRest/10)]+" ";if(thRest%10>0)result+=ones[thRest%10]+" ";result+="тысяч ";}
+    else if(thRest>=10){result+=teens[thRest-10]+" тысяч ";}
+    else if(thRest>0){result+=thousands[thRest]+" ";}
+    if(rest>=100){result+=hundreds[Math.floor(rest/100)]+" ";}
+    const lastRest=rest%100;
+    if(lastRest>=20){result+=tens[Math.floor(lastRest/10)]+" ";if(lastRest%10>0)result+=["","один","два","три","четыре","пять","шесть","семь","восемь","девять"][lastRest%10]+" ";}
+    else if(lastRest>=10){result+=teens[lastRest-10]+" ";}
+    else if(lastRest>0){result+=["","один","два","три","четыре","пять","шесть","семь","восемь","девять"][lastRest]+" ";}
+    return result.trim();
+  };
+  const totalWords=numToWords(total);
+  const today=new Date();
+  const months=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+  const dateStr=`«${today.getDate()}» ${months[today.getMonth()]} ${today.getFullYear()} г.`;
+  const actNum=port.id.slice(-6).toUpperCase();
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @page{size:A4;margin:20mm 15mm 20mm 25mm}
 *{box-sizing:border-box}
-body{font-family:"Times New Roman",serif;font-size:13px;color:#222;margin:0;padding:20mm 15mm 20mm 25mm;width:210mm;line-height:1.5}
-h2{text-align:center;font-size:16px;margin:0 0 4px}
-p{margin:8px 0}
-table{width:100%;border-collapse:collapse;margin:12px 0;table-layout:fixed}
-th,td{border:1px solid #999;padding:5px 8px;font-size:12px;word-wrap:break-word;overflow-wrap:break-word}
-th{background:#1f3864;color:#fff;text-align:center;font-size:11px}
+body{font-family:"Times New Roman",serif;font-size:12pt;color:#000;margin:0;padding:20mm 15mm 20mm 25mm;width:210mm;line-height:1.4}
+.right{text-align:right}
+.center{text-align:center}
+.just{text-align:justify;text-indent:1.25cm}
+h1{text-align:center;font-size:14pt;font-weight:bold;margin:20px 0 4px 0}
+h2{text-align:center;font-size:12pt;font-weight:bold;margin:0 0 8px 0}
+p{margin:6px 0;text-align:justify}
+.header-row{display:flex;justify-content:space-between;margin:15px 0}
+table{width:100%;border-collapse:collapse;margin:15px 0;table-layout:fixed;font-size:11pt}
+th,td{border:1px solid #000;padding:6px 8px;word-wrap:break-word;overflow-wrap:break-word;vertical-align:top}
+th{text-align:center;font-weight:bold;background:#f0f0f0}
+.c{text-align:center}
 .r{text-align:right}
-.total td{background:#f0f0f0;font-weight:bold}
-.sig{display:flex;justify-content:space-between;margin-top:50px}
-.sig>div{width:45%}
-.line{border-bottom:1px solid #000;margin-top:40px;padding-bottom:3px}
+.total td{font-weight:bold;background:#f0f0f0}
+.sig-table{width:100%;margin-top:40px;border:none}
+.sig-table td{border:none;vertical-align:top;padding:0;width:50%}
+.sig-table b{display:block;margin-bottom:4px}
+.sig-line{border-bottom:1px solid #000;display:inline-block;min-width:200px;margin-top:40px}
 </style></head><body>
-<h2>Акт № _____ об оказанных услугах</h2>
-<p style="text-align:center;color:#666;font-size:12px">к Договору № _______ от «___» ______ 2026 г.</p>
-<p style="text-align:center;color:#888;font-size:12px">город Москва · «___» __________ 2026 г.</p>
-<p><b>ООО «_______»</b>, именуемое «Заказчик», в лице Генерального директора ________, с одной стороны, и <b>ООО «Финтех Юнит»</b>, именуемое «Исполнитель», в лице Генерального директора Ефимова В.А., с другой стороны, составили настоящий Акт:</p>
-<p><b>1.</b> Исполнитель оказал, а Заказчик принял услуги:</p>
-<table><thead><tr><th style="width:5%">№</th><th style="width:35%">Наименование</th><th style="width:15%">Ед.изм.</th><th style="width:12%">Кол-во</th><th style="width:15%">Цена, руб.</th><th style="width:18%">Стоимость, руб.</th></tr></thead><tbody>${rows}<tr class="total"><td></td><td colspan="4" class="r">ИТОГО:</td><td class="r">${fmt(total)} руб.</td></tr></tbody></table>
-<p>НДС не облагается (пп.2 п.1 ст.145.1 НК РФ — участник проекта «Сколково»).</p>
-<p><b>2.</b> Услуги оказаны в полном объёме, в установленные сроки. Заказчик претензий не имеет.</p>
-<p><b>3.</b> Настоящий Акт составлен в 2 (двух) экземплярах, имеющих одинаковую юридическую силу.</p>
-<div class="sig"><div><b>Заказчик</b><br>ООО «_______»<br>Генеральный директор<div class="line">_______________/ _________</div></div><div><b>Исполнитель</b><br>ООО «Финтех Юнит»<br>Генеральный директор<div class="line">_______________/ Ефимов В.А.</div></div></div>
+
+<h1>АКТ № ${actNum}</h1>
+<h2>об оказанных услугах</h2>
+<p class="center">к Договору № ______ от «___» _________ 2026 г.</p>
+
+<div class="header-row">
+<span>г. Москва</span>
+<span>${dateStr}</span>
+</div>
+
+<p class="just"><b>${port.cname||"Общество с ограниченной ответственностью «_______»"}</b>, именуемое в дальнейшем «Заказчик», в лице Генерального директора ________, действующего на основании Устава, с одной стороны, и <b>Общество с ограниченной ответственностью «Финтех Юнит»</b>, именуемое в дальнейшем «Исполнитель», в лице Генерального директора Ефимова Валентина Андреевича, действующего на основании Устава, с другой стороны, составили настоящий Акт об оказанных услугах (далее — Акт) о нижеследующем:</p>
+
+<p class="just"><b>1.</b> Исполнитель оказал, а Заказчик принял услуги по актуализации, проверке и анализу портфеля дебиторской задолженности «${port.name}» (далее — Портфель) в рамках Договора № ______ от «___» ______ 2026 г.:</p>
+
+<table>
+<thead><tr>
+<th style="width:6%">№</th>
+<th style="width:42%">Наименование услуги</th>
+<th style="width:12%">Ед. изм.</th>
+<th style="width:12%">Кол-во</th>
+<th style="width:13%">Цена, руб.</th>
+<th style="width:15%">Стоимость, руб.</th>
+</tr></thead>
+<tbody>
+${rows}
+<tr class="total"><td colspan="5" class="r">ИТОГО:</td><td class="r">${fmt(total)}</td></tr>
+</tbody>
+</table>
+
+<p class="just"><b>2.</b> Общая стоимость оказанных услуг: ${fmt(total)} (${totalWords}) рублей 00 копеек. Стоимость услуг НДС не облагается на основании пп.2 п.1 ст.145.1 НК РФ (Исполнитель — участник проекта «Сколково»).</p>
+
+<p class="just"><b>3.</b> Услуги оказаны в полном объёме, в установленные сроки и с надлежащим качеством. Заказчик претензий по объёму, качеству и срокам оказания услуг не имеет.</p>
+
+<p class="just"><b>4.</b> Результаты проверки (аналитический отчёт, обогащённый реестр, реестр для судебного взыскания, паспорт портфеля) переданы Заказчику через личный кабинет на Платформе по адресу https://creditstatus.ru.</p>
+
+<p class="just"><b>5.</b> Настоящий Акт составлен в 2 (двух) экземплярах, имеющих одинаковую юридическую силу, по одному для каждой из Сторон, либо подписан в электронной форме через систему электронного документооборота.</p>
+
+<p style="margin-top:25px"><b>ПОДПИСИ СТОРОН:</b></p>
+
+<table class="sig-table">
+<tr>
+<td><b>Заказчик:</b><br>${port.cname||"ООО «_______»"}<br>Генеральный директор<br><span class="sig-line">_____________/ _________</span></td>
+<td><b>Исполнитель:</b><br>ООО «Финтех Юнит»<br>Генеральный директор<br><span class="sig-line">_____________/ Ефимов В.А.</span></td>
+</tr>
+</table>
+
 </body></html>`;
 }
 
@@ -218,18 +296,36 @@ function genPassHTML(port){
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @page{size:A4;margin:20mm 15mm 20mm 25mm}
 *{box-sizing:border-box}
-body{font-family:Arial,sans-serif;margin:0;padding:20mm 15mm 20mm 25mm;width:210mm;color:#222;font-size:14px;line-height:1.5}
-h1{color:#1f3864;border-bottom:3px solid #1f3864;padding-bottom:10px;font-size:22px}
-table{width:100%;border-collapse:collapse;margin:20px 0;table-layout:fixed}
-td{padding:10px 14px;border:1px solid #ddd;word-wrap:break-word}
-td:first-child{font-weight:bold;background:#f8f9fa;width:40%}
-td:last-child{font-size:15px;color:#1f3864;font-weight:bold}
+body{font-family:"Times New Roman",serif;margin:0;padding:20mm 15mm 20mm 25mm;width:210mm;color:#000;font-size:12pt;line-height:1.4}
+h1{text-align:center;font-size:14pt;font-weight:bold;margin:20px 0}
+h2{text-align:center;font-size:12pt;font-weight:bold;margin:0 0 20px 0}
+table{width:100%;border-collapse:collapse;margin:15px 0;table-layout:fixed;font-size:11pt}
+td{padding:8px 10px;border:1px solid #000;word-wrap:break-word;vertical-align:top}
+td:first-child{font-weight:bold;width:45%}
+p{text-align:justify;margin:8px 0}
+.footer{text-align:center;font-size:10pt;margin-top:30px}
 </style></head><body>
+
 <h1>ПАСПОРТ ПОРТФЕЛЯ</h1>
+<h2>дебиторской задолженности</h2>
+
 <table>
-${[["Портфель",port.name],["Дата загрузки",fD(port.date)],["Формат",port.fmt||"—"],["Количество записей",fmt(port.cnt)],["Стоимость проверки",fC(port.cost)],["Заказчик",port.cname],["Дата завершения",fD(port.done)],["Статус",port.st]].map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join("")}
+${[
+["Наименование портфеля",port.name],
+["Заказчик",port.cname||"—"],
+["Дата загрузки",fD(port.date)],
+["Формат реестра",port.fmt||"—"],
+["Количество записей",fmt(port.cnt)],
+["Стоимость проверки",fC(port.cost)],
+["Дата завершения проверки",fD(port.done)],
+["Статус",port.st]
+].map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join("")}
 </table>
-<p style="text-align:center;color:red;font-weight:bold;margin-top:40px;font-size:11px">КОНФИДЕНЦИАЛЬНО · ООО «Финтех Юнит» · ${new Date().getFullYear()}</p>
+
+<p style="margin-top:30px">Настоящий паспорт портфеля сформирован автоматически Универсальной модульной платформой Финтех Юнит по итогам проверки портфеля дебиторской задолженности.</p>
+
+<p class="footer"><b>КОНФИДЕНЦИАЛЬНО</b><br>ООО «Финтех Юнит» · ИНН 9709112416 · ${new Date().getFullYear()}</p>
+
 </body></html>`;
 }
 
@@ -296,40 +392,42 @@ function genReportHTML(port, rd) {
   const pct = (v) => n > 0 ? (v / n * 100).toFixed(1) + "%" : "—";
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-@page{size:A4;margin:18mm 15mm 18mm 20mm}
+@page{size:A4;margin:20mm 15mm 20mm 25mm}
 *{box-sizing:border-box}
-body{font-family:"Times New Roman",serif;margin:0;padding:18mm 15mm 18mm 20mm;width:210mm;color:#222;font-size:12px;line-height:1.6}
-h1{color:#1f3864;font-size:20px;border-bottom:3px solid #1f3864;padding-bottom:8px;margin:30px 0 15px;page-break-after:avoid}
-h2{color:#2e5090;font-size:15px;margin:20px 0 10px;page-break-after:avoid}
-h3{color:#2e5090;font-size:13px;margin:15px 0 8px}
-p{margin:6px 0;text-align:justify}
-table{width:100%;border-collapse:collapse;margin:10px 0;table-layout:fixed;font-size:11px}
-th,td{border:1px solid #ccc;padding:5px 8px;word-wrap:break-word;overflow-wrap:break-word}
-th,.hdr th{background:#1f3864;color:#fff;text-align:center;font-size:10px;font-weight:bold}
-.val{text-align:right;font-weight:bold;color:#1f3864}
-.summary td:first-child{background:#f8f9fa;font-weight:bold;width:55%}
-.risk-low{background:#c6efce}
-.risk-mid{background:#ffeb9c}
-.risk-high{background:#ffc7ce}
-.title-page{text-align:center;page-break-after:always;padding-top:60px}
-.title-page h1{border:none;font-size:28px;margin-bottom:5px}
-.title-page h2{font-size:18px;color:#2e5090;border:none}
-.title-page .meta{margin-top:40px;text-align:left;display:inline-block}
-.title-page .meta td{border:none;padding:4px 12px;font-size:13px}
-.title-page .meta td:first-child{font-weight:bold;color:#1f3864}
-.conf{color:red;font-weight:bold;font-size:11px;text-align:center;margin-top:30px}
-.footer{text-align:center;color:#999;font-size:9px;margin-top:40px;border-top:1px solid #ddd;padding-top:8px}
+body{font-family:"Times New Roman",serif;margin:0;padding:20mm 15mm 20mm 25mm;width:210mm;color:#000;font-size:12pt;line-height:1.4}
+h1{font-size:14pt;font-weight:bold;margin:20px 0 10px;text-align:left;page-break-after:avoid;text-transform:uppercase}
+h2{font-size:12pt;font-weight:bold;margin:15px 0 8px;page-break-after:avoid}
+h3{font-size:12pt;font-weight:bold;margin:12px 0 6px;font-style:italic}
+p{margin:6px 0;text-align:justify;text-indent:1.25cm}
+p.no-indent{text-indent:0}
+table{width:100%;border-collapse:collapse;margin:12px 0;table-layout:fixed;font-size:11pt}
+th,td{border:1px solid #000;padding:6px 8px;word-wrap:break-word;overflow-wrap:break-word;vertical-align:top}
+th,.hdr th{background:#f0f0f0;text-align:center;font-size:10pt;font-weight:bold}
+.val{text-align:right;font-weight:bold}
+.summary td:first-child{font-weight:bold;width:55%}
+.risk-low{background:#e8f5e9}
+.risk-mid{background:#fff8e1}
+.risk-high{background:#ffebee}
+.title-page{text-align:center;page-break-after:always;padding-top:80px}
+.title-page h1{font-size:20pt;margin:20px 0 10px;text-align:center;text-transform:none}
+.title-page h2{font-size:14pt;font-weight:normal;font-style:italic;margin:10px 0 40px}
+.title-page .meta{margin:40px auto;text-align:left;display:inline-block;border:none}
+.title-page .meta td{border:none;padding:6px 15px;font-size:12pt}
+.title-page .meta td:first-child{font-weight:bold;width:auto}
+.conf{font-weight:bold;font-size:11pt;text-align:center;margin-top:60px}
+.footer{text-align:center;font-size:10pt;margin-top:30px;border-top:1px solid #000;padding-top:8px}
 .page-break{page-break-before:always}
 </style></head><body>
 
 <div class="title-page">
-<p style="color:#999;font-size:12px">ООО «Финтех Юнит» · Универсальная модульная платформа</p>
-<h1 style="font-size:26px;color:#1f3864;border:none">АНАЛИТИЧЕСКИЙ ОТЧЁТ</h1>
-<h2 style="border:none;color:#2e5090">о комплексной актуализации и проверке<br>портфеля дебиторской задолженности</h2>
-<table class="meta" style="margin:40px auto;width:auto;border:none">
-${[["Портфель", port.name],["Заказчик", port.cname],["Формат реестра", port.fmt || "—"],["Количество записей", fmt(n)],["Дата проверки", fD(port.done || new Date().toISOString())],["Тип проверки", "Комплексная"]].map(([l,v])=>`<tr><td style="border:none;padding:4px 15px;font-weight:bold;color:#1f3864">${l}:</td><td style="border:none;padding:4px 15px">${v}</td></tr>`).join("")}
+<p class="no-indent" style="font-size:11pt">Общество с ограниченной ответственностью «Финтех Юнит»<br>Универсальная модульная платформа</p>
+<h1>АНАЛИТИЧЕСКИЙ ОТЧЁТ</h1>
+<h2>о комплексной актуализации и проверке<br>портфеля дебиторской задолженности</h2>
+<table class="meta">
+${[["Наименование портфеля", port.name],["Заказчик", port.cname||"—"],["Формат реестра", port.fmt || "—"],["Количество записей", fmt(n)],["Дата проверки", fD(port.done || new Date().toISOString())],["Тип проверки", "Комплексная"]].map(([l,v])=>`<tr><td>${l}:</td><td>${v}</td></tr>`).join("")}
 </table>
 <p class="conf">КОНФИДЕНЦИАЛЬНО</p>
+<p class="no-indent" style="margin-top:80px;font-size:10pt">г. Москва · ${new Date().getFullYear()} г.</p>
 </div>
 
 <h1>1. Резюме для руководства</h1>
