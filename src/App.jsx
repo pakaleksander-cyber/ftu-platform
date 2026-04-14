@@ -3,7 +3,6 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
-import { getStorage, ref as storageRef, uploadString, getBytes } from "firebase/storage";
 
 /* ── Firebase ── */
 const firebaseConfig = {
@@ -16,7 +15,6 @@ const firebaseConfig = {
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
-const storage = getStorage(fbApp);
 
 /* ── Storage: Firestore for shared data, localStorage for session ── */
 // Local cache for data (updated by subscriptions)
@@ -34,31 +32,55 @@ const S = {
   lrm: (k) => { try { localStorage.removeItem("ftu_" + k); } catch {} },
 };
 
-/* ── RawData: stored in Firebase Storage as JSON files ── */
+/* ── RawData: stored in Firestore, split into chunks to stay under 1MB doc limit ── */
 const RD = {
   _mem: {}, // in-memory cache to avoid re-downloading
   set: async (id, data) => {
     RD._mem[id] = data;
     try {
-      const json = JSON.stringify(data);
-      const ref = storageRef(storage, `rawdata/${id}.json`);
-      await uploadString(ref, json, 'raw', { contentType: 'application/json' });
+      const CHUNK_SIZE = 300; // ~300 rows per chunk to stay safely under 1MB
+      const rows = data.rows || [];
+      const chunks = [];
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        chunks.push(rows.slice(i, i + CHUNK_SIZE));
+      }
+      // Save metadata
+      await setDoc(doc(db, "rawdata", id), {
+        headers: data.headers,
+        totalRows: rows.length,
+        chunkCount: chunks.length
+      });
+      // Save each chunk in parallel
+      await Promise.all(chunks.map((chunk, i) =>
+        setDoc(doc(db, "rawdata", id + "_c" + i), { rows: chunk })
+      ));
     } catch(e) {
-      console.error("Storage upload error:", e);
+      console.error("RD save error:", e);
       throw e;
     }
   },
   get: async (id) => {
     if (RD._mem[id]) return RD._mem[id];
     try {
-      const ref = storageRef(storage, `rawdata/${id}.json`);
-      const bytes = await getBytes(ref);
-      const text = new TextDecoder().decode(bytes);
-      const data = JSON.parse(text);
-      RD._mem[id] = data;
-      return data;
+      const metaSnap = await getDoc(doc(db, "rawdata", id));
+      if (!metaSnap.exists()) return null;
+      const meta = metaSnap.data();
+      const chunkPromises = [];
+      for (let i = 0; i < meta.chunkCount; i++) {
+        chunkPromises.push(getDoc(doc(db, "rawdata", id + "_c" + i)));
+      }
+      const chunkSnaps = await Promise.all(chunkPromises);
+      const allRows = [];
+      for (const snap of chunkSnaps) {
+        if (snap.exists()) {
+          allRows.push(...snap.data().rows);
+        }
+      }
+      const result = { headers: meta.headers, rows: allRows };
+      RD._mem[id] = result;
+      return result;
     } catch(e) {
-      console.error("Storage download error:", e);
+      console.error("RD load error:", e);
       return null;
     }
   },
