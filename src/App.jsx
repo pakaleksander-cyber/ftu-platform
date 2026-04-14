@@ -51,9 +51,19 @@ const RD = {
         chunkCount: chunks.length
       });
       // Save each chunk in parallel - wrap each row in {v:[...]} to avoid nested arrays
+      // Also convert undefined/null to "" and ensure all cells are strings
+      const headerLen = (data.headers || []).length;
       await Promise.all(chunks.map((chunk, i) =>
         setDoc(doc(db, "rawdata", id + "_c" + i), {
-          rows: chunk.map(row => ({ v: row.map(cell => cell == null ? "" : String(cell)) }))
+          rows: chunk.map(row => {
+            const cells = [];
+            const maxLen = Math.max(headerLen, (row && row.length) || 0);
+            for (let j = 0; j < maxLen; j++) {
+              const c = row && row[j];
+              cells.push(c == null ? "" : String(c));
+            }
+            return { v: cells };
+          })
         })
       ));
     } catch(e) {
