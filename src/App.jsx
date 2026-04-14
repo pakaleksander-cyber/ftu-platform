@@ -3,7 +3,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
-import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "firebase/storage";
+import { getStorage, ref as storageRef, uploadString, getBytes } from "firebase/storage";
 
 /* ── Firebase ── */
 const firebaseConfig = {
@@ -52,10 +52,9 @@ const RD = {
     if (RD._mem[id]) return RD._mem[id];
     try {
       const ref = storageRef(storage, `rawdata/${id}.json`);
-      const url = await getDownloadURL(ref);
-      const response = await fetch(url);
-      if (!response.ok) return null;
-      const data = await response.json();
+      const bytes = await getBytes(ref);
+      const text = new TextDecoder().decode(bytes);
+      const data = JSON.parse(text);
       RD._mem[id] = data;
       return data;
     } catch(e) {
