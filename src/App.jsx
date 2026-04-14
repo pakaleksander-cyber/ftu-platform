@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { getStorage, ref as storageRef, uploadString, getDownloadURL } from "firebase/storage";
 
 /* ── Firebase ── */
 const firebaseConfig = {
@@ -15,12 +16,11 @@ const firebaseConfig = {
 };
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
+const storage = getStorage(fbApp);
 
-/* ── Storage: Firestore for shared data, localStorage for session, memory for raw data ── */
+/* ── Storage: Firestore for shared data, localStorage for session ── */
 // Local cache for data (updated by subscriptions)
 const _cache = {};
-// In-memory store for large raw data (can't go to Firestore due to size)
-const _rawCache = {};
 
 const S = {
   g: (k) => _cache[k] != null ? JSON.parse(JSON.stringify(_cache[k])) : null,
@@ -34,9 +34,35 @@ const S = {
   lrm: (k) => { try { localStorage.removeItem("ftu_" + k); } catch {} },
 };
 
+/* ── RawData: stored in Firebase Storage as JSON files ── */
 const RD = {
-  set: (id, data) => { _rawCache[id] = data; },
-  get: (id) => _rawCache[id] || null,
+  _mem: {}, // in-memory cache to avoid re-downloading
+  set: async (id, data) => {
+    RD._mem[id] = data;
+    try {
+      const json = JSON.stringify(data);
+      const ref = storageRef(storage, `rawdata/${id}.json`);
+      await uploadString(ref, json, 'raw', { contentType: 'application/json' });
+    } catch(e) {
+      console.error("Storage upload error:", e);
+      throw e;
+    }
+  },
+  get: async (id) => {
+    if (RD._mem[id]) return RD._mem[id];
+    try {
+      const ref = storageRef(storage, `rawdata/${id}.json`);
+      const url = await getDownloadURL(ref);
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const data = await response.json();
+      RD._mem[id] = data;
+      return data;
+    } catch(e) {
+      console.error("Storage download error:", e);
+      return null;
+    }
+  },
 };
 
 // Subscribe to all shared data on app start
@@ -639,15 +665,21 @@ function PgUpload({user,tick}){
 
   const submit=()=>{
     setLoading(true);
-    setTimeout(()=>{
-      const pid=gid();
-      RD.set(pid, rawData);
-      const p={id:pid,name:info.name.replace(/\.[^.]+$/,""),cid:user.id,cname:user.name,date:new Date().toISOString(),cnt,fmt:info.format,svcs:sel,cost,st:"Загружен",docs:[]};
-      const ps=S.g("ports")||[];ps.unshift(p);S.s("ports",ps);
-      addLog(user,"Загрузка",`${info.name}, ${fmt(cnt)} зап.`);
-      addN("executor","Новый портфель",`${user.name}: ${p.name} (${fmt(cnt)} зап.)`);
-      setLoading(false);setStep(2);tick();
-    },1500);
+    (async()=>{
+      try {
+        const pid=gid();
+        await RD.set(pid, rawData);
+        const p={id:pid,name:info.name.replace(/\.[^.]+$/,""),cid:user.id,cname:user.name,date:new Date().toISOString(),cnt,fmt:info.format,svcs:sel,cost,st:"Загружен",docs:[]};
+        const ps=S.g("ports")||[];ps.unshift(p);await S.s("ports",ps);
+        addLog(user,"Загрузка",`${info.name}, ${fmt(cnt)} зап.`);
+        addN("executor","Новый портфель",`${user.name}: ${p.name} (${fmt(cnt)} зап.)`);
+        setLoading(false);setStep(2);tick();
+      } catch(e) {
+        console.error(e);
+        alert("Ошибка загрузки портфеля: "+e.message);
+        setLoading(false);
+      }
+    })();
   };
 
   if(loading)return <div className="flex flex-col items-center py-24"><div className="w-12 h-12 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin mb-4"></div><h2 className="text-lg font-bold text-slate-800 mb-1">Обработка...</h2><p className="text-[12px] text-slate-400">Загрузка и анализ портфеля</p></div>;
@@ -686,20 +718,20 @@ function PgList({user,role,tick}){
 function PgDocs({user}){
   const ps=(S.g("ports")||[]).filter(p=>user.role==="client"?p.cid===user.id:true).filter(p=>p.docs?.length);
   const [loading,setLoading]=useState(null);
-  const dl=(port,doc)=>{
-    setLoading(doc.t+"_"+port.id);
-    setTimeout(()=>{
+  const dl=(port,docItem)=>{
+    setLoading(docItem.t+"_"+port.id);
+    (async()=>{
       try{
-        const rd=RD.get(port.id);
-        if(doc.t==="report"){const html=genReportHTML(port,rd);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Отчёт_${port.name}.doc`,"application/msword")}
-        else if(doc.t==="enriched"&&rd){const buf=genEnrichedXLSX(rd);if(buf)dlBin(buf,`Обогащённый_${port.name}.xlsx`,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-        else if(doc.t==="court"&&rd){const buf=genCourtXLSX(rd);if(buf)dlBin(buf,`Реестр_суд_${port.name}.xlsx`,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-        else if(doc.t==="act"){const html=genActHTML(port);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Акт_${port.name}.doc`,"application/msword")}
-        else if(doc.t==="passport"){const html=genPassHTML(port);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Паспорт_${port.name}.html`,"text/html")}
-        else {alert("Данные портфеля недоступны. Загрузите файл заново и повторите обработку (данные хранятся в текущей сессии браузера).")}
+        const rd=await RD.get(port.id);
+        if(docItem.t==="report"){const html=genReportHTML(port,rd);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Отчёт_${port.name}.doc`,"application/msword")}
+        else if(docItem.t==="enriched"&&rd){const buf=genEnrichedXLSX(rd);if(buf)dlBin(buf,`Обогащённый_${port.name}.xlsx`,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        else if(docItem.t==="court"&&rd){const buf=genCourtXLSX(rd);if(buf)dlBin(buf,`Реестр_суд_${port.name}.xlsx`,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        else if(docItem.t==="act"){const html=genActHTML(port);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Акт_${port.name}.doc`,"application/msword")}
+        else if(docItem.t==="passport"){const html=genPassHTML(port);dlBin(new Blob([html],{type:"text/html;charset=utf-8"}),`Паспорт_${port.name}.html`,"text/html")}
+        else {alert("Данные портфеля недоступны в Firebase Storage. Возможно, файл был загружен давно или произошла ошибка при сохранении.")}
       }catch(err){console.error(err);alert("Ошибка генерации: "+err.message)}
       setLoading(null);
-    },500);
+    })();
   };
   return <div>
     <h1 className="text-2xl font-bold text-slate-800 mb-6">Документы</h1>
