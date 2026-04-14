@@ -50,9 +50,11 @@ const RD = {
         totalRows: rows.length,
         chunkCount: chunks.length
       });
-      // Save each chunk in parallel
+      // Save each chunk in parallel - wrap each row in {v:[...]} to avoid nested arrays
       await Promise.all(chunks.map((chunk, i) =>
-        setDoc(doc(db, "rawdata", id + "_c" + i), { rows: chunk })
+        setDoc(doc(db, "rawdata", id + "_c" + i), {
+          rows: chunk.map(row => ({ v: row.map(cell => cell == null ? "" : String(cell)) }))
+        })
       ));
     } catch(e) {
       console.error("RD save error:", e);
@@ -73,7 +75,11 @@ const RD = {
       const allRows = [];
       for (const snap of chunkSnaps) {
         if (snap.exists()) {
-          allRows.push(...snap.data().rows);
+          // Unwrap {v:[...]} back to arrays
+          const wrappedRows = snap.data().rows || [];
+          for (const wrapped of wrappedRows) {
+            allRows.push(wrapped.v || []);
+          }
         }
       }
       const result = { headers: meta.headers, rows: allRows };
